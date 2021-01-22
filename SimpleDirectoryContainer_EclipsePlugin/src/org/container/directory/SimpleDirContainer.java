@@ -2,6 +2,10 @@ package org.container.directory;
 
 import java.io.File;
 import java.io.FilenameFilter;
+import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.nio.file.attribute.BasicFileAttributeView;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -50,7 +54,11 @@ public class SimpleDirContainer implements IClasspathContainer {
    // directory that will hold files for inclusion in this container
    private File _dir;
    // Filename extensions to include in container
-   private HashSet<String> _exts;
+   private HashSet<String> _exts = new HashSet<>();
+   {
+      _exts.add("zip");
+      _exts.add("jar");
+   };
 
    private IClasspathEntry[] classpathEntries;
 
@@ -82,13 +90,24 @@ public class SimpleDirContainer implements IClasspathContainer {
       public boolean accept(File dir, String name) {
          // if there is no dot then we don't have an extension and we'll skip
          // this
+         String f = dir.toString() + File.separator + name;
+         BasicFileAttributeView view = Files.getFileAttributeView(new File(f).toPath(), BasicFileAttributeView.class);
+
+         long size = 0;
+         try {
+            size = view.readAttributes().size();
+         } catch (Exception e) {
+         }
+         if (size < 1) {
+            return false;
+         }
+
          if (name.lastIndexOf('.') == -1) {
             return true;
          }
 
          String ext = name.substring(name.lastIndexOf('.') + 1, name.length()).toLowerCase();
          String prefix = name.substring(0, name.lastIndexOf('.'));
-
          // lets avoid including filnames that end with -src since
          // we will use this as the convention for attaching source
          if (prefix.endsWith("-src")) {

@@ -83,7 +83,7 @@ public class SimpleDirContainer implements IClasspathContainer {
          // if there is no dot then we don't have an extension and we'll skip
          // this
          if (name.lastIndexOf('.') == -1) {
-            return false;
+            return true;
          }
 
          String ext = name.substring(name.lastIndexOf('.') + 1, name.length()).toLowerCase();
@@ -98,7 +98,8 @@ public class SimpleDirContainer implements IClasspathContainer {
          // all. Just a hack for the previous code
          if (_exts == null) {
             // Logger.log(Logger.WARNING,
-            // "Directory Container could not read the extensions from .classpath for: "
+            // "Directory Container could not read the extensions from
+            // .classpath for: "
             // + dir.toString()
             // + " of name " + name);
             return true;
@@ -169,9 +170,8 @@ public class SimpleDirContainer implements IClasspathContainer {
       IPath relativePath = libsPath.removeFirstSegments(1);
       File classPathFolder = new File(rootProj, relativePath.toString());
       if (!classPathFolder.exists()) {
-         Logger.log(Logger.WARNING,
-               "Folder of Directory Container missing: " + libsPath.toString() + " of project " + project.getElementName()
-                     + " creating it now to avoid errors in eclipse");
+         Logger.log(Logger.WARNING, "Folder of Directory Container missing: " + libsPath.toString() + " of project "
+               + project.getElementName() + " creating it now to avoid errors in eclipse");
 
          classPathFolder.mkdirs();
       }
@@ -203,14 +203,16 @@ public class SimpleDirContainer implements IClasspathContainer {
    public IClasspathEntry[] getClasspathEntries() {
       if (isClasspathChanged() && (currentStatus != Status.RequestedContainerUpdate)) {
          try {
-            // okay fine, we have an change in the classpath, so request an update to eclipse
+            // okay fine, we have an change in the classpath, so request an
+            // update to eclipse
             IWorkspaceRoot root = ResourcesPlugin.getWorkspace().getRoot();
             IProject project = root.getProject(_project.getElementName());
             IJavaProject javaProject = JavaCore.create(project);
 
             // a very nice info, which is completly missing in the eclipse docs.
             // http://stackoverflow.com/questions/12806888/refreshing-classpath-container-name-in-eclipse
-            // means this class may never change, so we will update the container and
+            // means this class may never change, so we will update the
+            // container and
             // set a new one.
             // The container must be immutable, so we have to request a update
             ClasspathContainerInitializer initializer = JavaCore.getClasspathContainerInitializer(ID.toString());
@@ -221,14 +223,16 @@ public class SimpleDirContainer implements IClasspathContainer {
             Logger.log(Logger.ERROR, "getClasspathEntries - ERROR: " + e.getMessage());
          }
       }
-      
+
       return classpathEntries;
    }
 
    /**
-    * TODO: this is a evil hack, should be refactored properly to do only small steps.
+    * TODO: this is a evil hack, should be refactored properly to do only small
+    * steps.
     * 
-    * @param classpathDirectory the directory of the given classpath folder in eclipse.
+    * @param classpathDirectory
+    *           the directory of the given classpath folder in eclipse.
     * @return the array of the classpath entries in the given folder
     */
    private IClasspathEntry[] resolveLibsFromDir(File classpathDirectory) {
@@ -238,58 +242,67 @@ public class SimpleDirContainer implements IClasspathContainer {
       File resolvedDir = classpathDirectory;
       if (resolvedDir.isDirectory()) {
 
-         // get the files and sort the files to be in correct lexical order in eclipse classpath later
-         File[] libs = resolvedDir.listFiles(_dirFilter);
-         Arrays.sort(libs);
-
-         try {
-            for (File lib : libs) {
-               // strip off the file extension
-               String[] splittedName = lib.getName().split("[.]");
-               String ext = splittedName[splittedName.length - 1];
-
-               // TODO: this is really a awful check against sources
-               // now see if this archive has an associated src jar
-               File srcArc = new File(lib.getAbsolutePath().replace("." + ext, "-src." + ext));
-               Path srcPath = null;
-               // if the source archive exists then get the path to attach it
-               if (srcArc.exists()) {
-                  srcPath = new Path(srcArc.getAbsolutePath());
-               }
-               // create a new CPE_LIBRARY type of cp entry with an attached
-               // source
-               // archive if it exists
-
-               IClasspathEntry entry = JavaCore.newLibraryEntry(new Path(lib.getAbsolutePath()), srcPath, new Path("/"));
-               entryList.add(entry);
-            }
-         } catch (Exception e) {
-            e.printStackTrace();
-            Logger.log(Logger.ERROR, "getClasspathEntries - ERROR: " + e.getMessage());
-         }
+         addLibEntry(entryList, resolvedDir);
       }
-      
-      
+
       // convert the list to an array and return it
       IClasspathEntry[] entryArray = new IClasspathEntry[entryList.size()];
 
       return (IClasspathEntry[]) entryList.toArray(entryArray);
    }
 
+   private void addLibEntry(ArrayList<IClasspathEntry> entryList, File resolvedDir) {
+      // get the files and sort the files to be in correct lexical order in
+      // eclipse classpath later
+      File[] libs = resolvedDir.listFiles(_dirFilter);
+      Arrays.sort(libs);
+
+      try {
+         for (File lib : libs) {
+            if (lib.isDirectory()) {
+               this.addLibEntry(entryList, lib);
+               continue;
+            }
+            // strip off the file extension
+            String[] splittedName = lib.getName().split("[.]");
+            String ext = splittedName[splittedName.length - 1];
+
+            // TODO: this is really a awful check against sources
+            // now see if this archive has an associated src jar
+            File srcArc = new File(lib.getAbsolutePath().replace("." + ext, "-src." + ext));
+            Path srcPath = null;
+            // if the source archive exists then get the path to attach it
+            if (srcArc.exists()) {
+               srcPath = new Path(srcArc.getAbsolutePath());
+            }
+            // create a new CPE_LIBRARY type of cp entry with an attached
+            // source
+            // archive if it exists
+
+            IClasspathEntry entry = JavaCore.newLibraryEntry(new Path(lib.getAbsolutePath()), srcPath, new Path("/"));
+            entryList.add(entry);
+         }
+      } catch (Exception e) {
+         e.printStackTrace();
+         Logger.log(Logger.ERROR, "getClasspathEntries - ERROR: " + e.getMessage());
+      }
+   }
+
    private boolean isClasspathChanged() {
       boolean result = false;
-      
+
       List<IClasspathEntry> current = Arrays.asList(classpathEntries);
       IClasspathEntry[] newlyResolved = resolveLibsFromDir(_dir);
       List<IClasspathEntry> difference = new ArrayList<IClasspathEntry>();
       difference.addAll(current);
       difference.removeAll(Arrays.asList(newlyResolved));
-            
+
       if (newlyResolved.length != classpathEntries.length) {
          // okay trivial test
          result = true;
       } else if (difference.size() > 0) {
-         // maybe same mount of references reside, but the libs have changed (e.g. filename, version, ...)
+         // maybe same mount of references reside, but the libs have changed
+         // (e.g. filename, version, ...)
          result = true;
       }
       return result;
@@ -428,15 +441,15 @@ public class SimpleDirContainer implements IClasspathContainer {
                   (storedContainer.getClass().getSimpleName().equals("PersistedClasspathContainer"))) {
                result = new SimpleDirContainer(storedContainer.getPath(), project);
             } else {
-               Logger.log(Logger.ERROR, "Classpath container " + SimpleDirContainer.class.getSimpleName() + " lookup failed: "
-                     + containerPath.toString() + " of project " + project.getElementName()
-                     + " found a corresponding path-value to SimpleDirContainer but not a instance of it");
+               Logger.log(Logger.ERROR,
+                     "Classpath container " + SimpleDirContainer.class.getSimpleName() + " lookup failed: " + containerPath.toString()
+                           + " of project " + project.getElementName()
+                           + " found a corresponding path-value to SimpleDirContainer but not a instance of it");
             }
          }
       } catch (JavaModelException modelEx) {
-         Logger.log(Logger.ERROR,
-               "Classpath container " + SimpleDirContainer.class.getSimpleName() + " lookup failed: " + containerPath.toString()
-                     + " of project " + project.getElementName());
+         Logger.log(Logger.ERROR, "Classpath container " + SimpleDirContainer.class.getSimpleName() + " lookup failed: "
+               + containerPath.toString() + " of project " + project.getElementName());
       }
 
       return result;

@@ -2,13 +2,13 @@ package org.container.directory;
 
 import java.io.File;
 import java.io.FilenameFilter;
-import java.net.URI;
 import java.nio.file.Files;
-import java.nio.file.Paths;
 import java.nio.file.attribute.BasicFileAttributeView;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -17,7 +17,9 @@ import org.eclipse.core.resources.IProject;
 import org.eclipse.core.resources.IWorkspaceRoot;
 import org.eclipse.core.resources.ResourcesPlugin;
 import org.eclipse.core.runtime.CoreException;
+import org.eclipse.core.runtime.ILog;
 import org.eclipse.core.runtime.IPath;
+import org.eclipse.core.runtime.IStatus;
 import org.eclipse.core.runtime.Path;
 import org.eclipse.jdt.core.ClasspathContainerInitializer;
 import org.eclipse.jdt.core.IClasspathAttribute;
@@ -73,11 +75,48 @@ public class SimpleDirContainer implements IClasspathContainer {
       Initializing, InUse, RequestedContainerUpdate
    }
 
+   class FilterResult {
+      String reason;
+      boolean result;
+      String fileName;
+
+      public String getReason() {
+         return reason;
+      }
+
+      public void setReason(String reason) {
+         this.reason = reason;
+      }
+
+      public boolean isResultTrue() {
+         return result;
+      }
+
+      public void setResult(boolean result) {
+         this.result = result;
+      }
+
+      public String getFileName() {
+         return fileName;
+      }
+
+      public void setFileName(String fileName) {
+         this.fileName = fileName;
+      }
+
+   }
+
    /**
     * This filename filter will be used to determine which files will be
     * included in the container
     */
    private FilenameFilter _dirFilter = new FilenameFilter() {
+
+      private boolean dropLog(FilterResult result) {
+         ILog log = Activator.getDefault().getLog();
+         log.log(new org.eclipse.core.runtime.Status(IStatus.OK, Activator.PLUGIN_ID, result.getFileName() + " : " + result.getReason()));
+         return result.isResultTrue();
+      }
 
       /**
        * This File filter is used to filter files that are not in the configured
@@ -88,21 +127,16 @@ public class SimpleDirContainer implements IClasspathContainer {
        * @see java.io.FilenameFilter#accept(java.io.File, java.lang.String)
        */
       public boolean accept(File dir, String name) {
+         FilterResult result = new FilterResult();
+         result.setFileName(name);
          // if there is no dot then we don't have an extension and we'll skip
          // this
          String f = dir.toString() + File.separator + name;
-         BasicFileAttributeView view = Files.getFileAttributeView(new File(f).toPath(), BasicFileAttributeView.class);
+         File file = new File(f);
 
-         long size = 0;
-         try {
-            size = view.readAttributes().size();
-         } catch (Exception e) {
-         }
-         if (size < 1) {
-            return false;
-         }
-
-         if (name.lastIndexOf('.') == -1) {
+         if (file.isDirectory() || name.lastIndexOf('.') == -1) {
+            result.setReason("File is a directory");
+            result.setResult(true);
             return true;
          }
 
@@ -111,8 +145,25 @@ public class SimpleDirContainer implements IClasspathContainer {
          // lets avoid including filnames that end with -src since
          // we will use this as the convention for attaching source
          if (prefix.endsWith("-src")) {
-            return false;
+            result.setReason("prefix end with -src" + ext + prefix);
+            result.setResult(false);
+            return dropLog(result);
          }
+
+         BasicFileAttributeView view = Files.getFileAttributeView(file.toPath(), BasicFileAttributeView.class);
+
+         long size = 0;
+         try {
+            size = view.readAttributes().size();
+         } catch (Exception e) {
+         }
+
+         if (size < 1) {
+            result.setReason("Size lower than one");
+            result.setResult(false);
+            return dropLog(result);
+         }
+
          // Darko TODO: handling of dir container extension must be improved at
          // all. Just a hack for the previous code
          if (_exts == null) {
@@ -121,14 +172,18 @@ public class SimpleDirContainer implements IClasspathContainer {
             // .classpath for: "
             // + dir.toString()
             // + " of name " + name);
+            result.setReason("exts is null");
+            result.setResult(true);
             return true;
          } else {
             if (_exts.contains(ext)) {
+               result.setReason("ext is in allowed");
+               result.setResult(true);
                return true;
             }
          }
 
-         return false;
+         return dropLog(result);
       }
    };
 
@@ -274,7 +329,16 @@ public class SimpleDirContainer implements IClasspathContainer {
       // get the files and sort the files to be in correct lexical order in
       // eclipse classpath later
       File[] libs = resolvedDir.listFiles(_dirFilter);
-      Arrays.sort(libs);
+
+      // compare to inverse because directory container consider to upper
+      // version of same name lib!
+      Comparator<File> fileComp = new Comparator<File>() {
+         @Override
+         public int compare(File f1, File f2) {
+            return f2.getPath().compareToIgnoreCase(f1.getPath());
+         }
+      };
+      Arrays.sort(libs, fileComp);
 
       try {
          for (File lib : libs) {
